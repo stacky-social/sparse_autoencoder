@@ -5,8 +5,8 @@ version = "0.1"
 authors = [{name = "OpenAI"}]
 dependencies = [
     "blobfile == 2.0.2",
-    "torch == 2.1.0",
-    "transformer_lens == 1.9.1",
+    "torch",
+    "transformer_lens == 1.7.0",
 ]
 readme = "README.md"
 

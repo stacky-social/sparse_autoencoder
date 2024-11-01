@@ -1,13 +1,84 @@
 # Sparse autoencoders
 
 This repository hosts:
+
 - sparse autoencoders trained on the GPT2-small model's activations.
 - a visualizer for the autoencoders' features
 
 ### Install
 
+#### On MIT Satori Computing Cluster
+
+1. ssh into Satori
+2. up your environment
 ```sh
-pip install git+https://github.com/openai/sparse_autoencoder.git
+# install custom miniconda
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-ppc64le.sh .
+chmod +x ./Miniconda3-latest-Linux-ppc64le.sh
+./Miniconda3-latest-Linux-ppc64le.sh -b -p ./mc3
+source ./mc3/bin/activate
+
+# add the relevant channels
+conda config --prepend channels https://ftp.osuosl.org/pub/open-ce/current
+
+#rename the environment if you can't activate it 
+conda rename -p path/to/mc3 mc3-sae
+conda activate mc3-sae
+
+#install packages!
+conda install pytorch=2.1.2
+conda install conda-forge::blobfile
+#currently not able to get transformer_lens in here
+
+#to run
+srun --gres=gpu:1 -N 1 --mem=1T --time 1:00:00 --pty /bin/bash
+conda activate mc3-sae
+python testing.py
+```
+
+Failed attempts at environment setup:
+```sh
+conda config --prepend channels \
+https://opence.mit.edu
+conda config --add channels conda-forge
+export IBM_POWERAI_LICENSE_ACCEPT=yes
+conda create --name stacky-sae python=3.7
+conda install pytorch
+conda install conda-forge::blobfile
+conda install conda-forge::pyarrow
+pip install transformer-lens
+
+#to run
+srun --gres=gpu:4 -N 1 --mem=1T --time 1:00:00 -I --pty /bin/bash
+module load cuda/11.8.0
+```
+
+```sh
+#trying a higher version of python
+module load anaconda3/2020.02-2ks5tch
+# conda install -n base conda-libmamba-solver
+# conda config --set solver libmamba
+conda create --name stacky-sae python=3.10
+conda activate stacky-sae
+# module load cuda/11.4
+conda config --prepend channels https://ftp.osuosl.org/pub/open-ce/current
+# conda install pytorch=1.12.1=cuda11.4_py310_1
+# conda install pytorch=1.9.0=cuda10.2_py39_1
+conda install pytorch=2.1.2=cuda12.2_py310_1 # will take forever
+# conda install pytorch torchvision pytorch-cuda=11.8 -c pytorch -c nvidia
+```
+
+```sh
+# experimenting
+conda create --name stacky-sae2 python=3.12
+conda activate stacky-sae2
+pip install --upgrade pip
+pip install --upgrade setuptools
+pip install -e .
+```
+
+```sh
+pip install -e .
 ```
 
 ### Code structure
