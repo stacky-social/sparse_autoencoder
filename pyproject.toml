@@ -4,9 +4,11 @@ description="Sparse autoencoder for GPT2"
 version = "0.1"
 authors = [{name = "OpenAI"}]
 dependencies = [
-    "blobfile == 2.0.2",
+    "blobfile",
     "torch",
-    "transformer_lens == 1.7.0",
+    "triton",
+    "transformer_lens",
+    "geom_median"
 ]
 readme = "README.md"
 

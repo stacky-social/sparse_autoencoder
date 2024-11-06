@@ -23,6 +23,10 @@ import triton
 import triton.language as tl
 from sparse_autoencoder.kernels import *
 from torch.distributed import ReduceOp
+from geom_median.torch import compute_geometric_median
+from contextlib import contextmanager
+import wandb
+
 
 RANK = int(os.environ.get("RANK", "0"))
 
@@ -528,7 +532,6 @@ def print0(*a, **k):
         print(*a, **k)
 
 
-import wandb
 
 
 class Logger:
@@ -612,8 +615,6 @@ def training_loop_(
 
 
 def init_from_data_(ae, stats_acts_sample, comms):
-    from geom_median.torch import compute_geometric_median
-
     ae.pre_bias.data = (
         compute_geometric_median(stats_acts_sample[:32768].float().cpu()).median.cuda().float()
     )
@@ -634,7 +635,6 @@ def init_from_data_(ae, stats_acts_sample, comms):
         print0("out norm", (ae(x)[0] - ae.pre_bias.data).norm(dim=-1).mean().item())
 
 
-from contextlib import contextmanager
 
 
 @contextmanager
@@ -682,7 +682,8 @@ class EmaModel:
 @dataclass
 class Config:
     n_op_shards: int = 1
-    n_replicas: int = 8
+    # n_replicas: int = 8
+    n_replicas: int = 1
 
     n_dirs: int = 32768
     bs: int = 131072

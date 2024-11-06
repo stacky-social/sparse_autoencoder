@@ -7,10 +7,38 @@ This repository hosts:
 
 ### Install
 
-#### On MIT Satori Computing Cluster
+#### On MIT Engaging Computing Cluster
+
+1. ssh into Engaging
+2. Request a compute node for faster environment solving. NOTE: not everyone has access to this partition
+```sh
+# On a rocky 8 login node
+srun --time 1:00:00 -n 1 -N 1 --partition mit_normal --pty /bin/bash
+```
+3. Set up a mamba environment with miniforge
+```sh
+module use /orcd/software/core/001/modulefiles/
+module load miniforge/24.3.0-0 # to use mamba instead of conda!
+mamba create --name stacky-sae python=3.10 pytorch triton blobfile
+mamba activate stacky-sae
+```
+4. install the remaining pip libraries (transformer_lens, geom_median, etc)
+```sh
+pip install -e . 
+```
+
+5. Running the code: Request a compute node with a GPU NOTE: not everyone has access to this partition
+```sh
+srun --time 1:00:00 --gres=gpu:1 -n 1 -N 1 --partition mit_normal_gpu --pty /bin/bash
+mamba activate stacky-sae
+python testing.py #you should see that you have access to a CUDA GPU!
+```
+
+#### Failed attempts at environment setup:
 
 1. ssh into Satori
-2. up your environment
+2. set up your environment
+
 ```sh
 # install custom miniconda
 wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-ppc64le.sh .
@@ -36,7 +64,6 @@ conda activate mc3-sae
 python testing.py
 ```
 
-Failed attempts at environment setup:
 ```sh
 conda config --prepend channels \
 https://opence.mit.edu
