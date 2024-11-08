@@ -11,26 +11,40 @@ This repository hosts:
 
 1. ssh into Engaging
 2. Request a compute node for faster environment solving. NOTE: not everyone has access to this partition
+
 ```sh
 # On a rocky 8 login node
 srun --time 1:00:00 -n 1 -N 1 --partition mit_normal --pty /bin/bash
 ```
+
 3. Set up a mamba environment with miniforge
+
 ```sh
 module use /orcd/software/core/001/modulefiles/
 module load miniforge/24.3.0-0 # to use mamba instead of conda!
 mamba create --name stacky-sae python=3.10 pytorch triton blobfile
 mamba activate stacky-sae
 ```
-4. install the remaining pip libraries (transformer_lens, geom_median, etc)
+
+4. install the remaining pip libraries (transformer_lens, geom_median, dotenv, etc)
+
 ```sh
 pip install -e . 
 ```
 
-5. Running the code: Request a compute node with a GPU NOTE: not everyone has access to this partition
+5. Create an environment file named `.env` and populate the following values:
+   1. MILVUS_URI=<URI for Milvus db>
+   2. MILVUS_TOKEN=<authentication token for Milvus db>
+   3. LOG_FOLDER=<filepath to folder containing log files>
+   4. EMBEDDINGS_FOLDER=<filepath folder containing embeddings>
+
+6. Running the code: Request a compute node with a GPU. NOTE: not everyone has access to this partition
+
 ```sh
 srun --time 1:00:00 --gres=gpu:1 -n 1 -N 1 --partition mit_normal_gpu --pty /bin/bash
-mamba activate stacky-sae
+module load miniforge
+mamba activate stacky_sae
+cd sparse_autoencoder
 python testing.py #you should see that you have access to a CUDA GPU!
 ```
 

@@ -8,7 +8,9 @@ dependencies = [
     "torch",
     "triton",
     "transformer_lens",
-    "geom_median"
+    "geom_median",
+    "python-dotenv",
+    "pymilvus"
 ]
 readme = "README.md"
 
