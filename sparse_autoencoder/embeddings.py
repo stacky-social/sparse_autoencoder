@@ -37,8 +37,7 @@ class NoEmbeddingsError(Exception):
 class EmbeddingsDataset(Dataset):
 
     def __init__(self, collection_name="mock_mastadon", 
-                partitions=["_default", "112734616419053181", "112735699993230698", "nyt_injected", "stackyredditcom"],
-                filepath=None):
+                partitions=["_default", "112734616419053181", "112735699993230698", "nyt_injected", "stackyredditcom"]):
         """
         Args:
             collection_name (string): Name of the collection in Milvus
@@ -48,7 +47,7 @@ class EmbeddingsDataset(Dataset):
         milvus_token = os.getenv("MILVUS_TOKEN")
         self.collection_name = collection_name
         self.partitions = partitions
-        self.embeddings = None
+        self.embeddings = None # this gets populated via load_all_embeddings
 
         self.client = MilvusClient(uri=milvus_uri, token=milvus_token)
         self.connection = connections.connect(uri=milvus_uri, token=milvus_token)
@@ -61,8 +60,8 @@ class EmbeddingsDataset(Dataset):
             The entry point for loading all embeddings from Milvus
             Args:
                 dir (string): Path to a folder where the embeddings are stored. 
-                from_milvus (bool): If True, embeddings are loaded from Milvus into the directory dir, and then loaded into memory from that directory
-                    
+                from_dir (bool): If True, load embeddings from the given directory. 
+                    If False, load embeddings from Milvus, and save them to the given directory, and then load them                    
         """
         if from_dir == False:
             self.save_embeddings_from_milvus(dir=dir)
@@ -73,7 +72,7 @@ class EmbeddingsDataset(Dataset):
     
     def load_all_embeddings_from_folder(self, dir=os.environ.get("EMBEDDINGS_FOLDER")):
         """
-            Load all embeddings from a file
+            Load all embeddings from a the given directory
             Args:
                 dir (string): Path to a folder where embeddings are stored.
         """
@@ -97,19 +96,20 @@ class EmbeddingsDataset(Dataset):
         """
             Save embeddings from Milvus. This is done in batches, and each batch is turned into a 
             tensor and saved to a file in the given directory
+            Args:
+                dir (string): Path to a folder where the embeddings will be saved
         """
 
         iterator = self.collection.query_iterator(
-            batch_size=10, # max batch size from Milvus
-            # batch_size=5, # max batch size from Milvus
-            limit=50, # Controls the number of results returned in total
-            # expr="",
+            batch_size=10, # for testing
+            # batch_size=500,
+            limit=50, # for testing
             output_fields=["id", "text_vector", "text"]
         )
 
         start = 0 # for file naming
         end = 0 # for file naming
-        total = 0
+        total = 0 # for logging
         while True:
             result = iterator.next()
             num_returned = len(result)
@@ -132,7 +132,6 @@ class EmbeddingsDataset(Dataset):
             
             start = end+1
                     
-        
         logger.info(f"Total number of embeddings saved: {total}")
     
     def __len__(self):
@@ -153,16 +152,15 @@ class EmbeddingsDataset(Dataset):
         for partition in self.partitions:
             logger.info(f"Loading partition {partition}")
             self.load_partition(partition)
-            logger.info(self.get_partition_stat(partition))
+            logger.info(self.get_partition_stats(partition))
         
         logger.info("All partitions loaded")
 
     def release_collection(self):
         self.client.release_collection(self.collection_name)
 
-    def get_partition_stat(self, partition_names):
+    def get_partition_stats(self, partition_names):
         return self.client.get_partition_stats(self.collection_name, partition_names)
-
 
 
 if __name__ == "__main__":

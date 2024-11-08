@@ -33,17 +33,17 @@ pip install -e .
 ```
 
 5. Create an environment file named `.env` and populate the following values:
+
    1. MILVUS_URI=<URI for Milvus db>
    2. MILVUS_TOKEN=<authentication token for Milvus db>
    3. LOG_FOLDER=<filepath to folder containing log files>
    4. EMBEDDINGS_FOLDER=<filepath folder containing embeddings>
-
 6. Running the code: Request a compute node with a GPU. NOTE: not everyone has access to this partition
 
 ```sh
 srun --time 1:00:00 --gres=gpu:1 -n 1 -N 1 --partition mit_normal_gpu --pty /bin/bash
 module load miniforge
-mamba activate stacky_sae
+mamba activate stacky-sae
 cd sparse_autoencoder
 python testing.py #you should see that you have access to a CUDA GPU!
 ```
