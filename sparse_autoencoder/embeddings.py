@@ -54,7 +54,7 @@ class EmbeddingsDataset(Dataset):
         self.connection = connections.connect(uri=milvus_uri, token=milvus_token)
         self.collection = Collection(collection_name)
         
-    def load_all_embeddings(self, dir=os.environ.get("EMBEDDINGS_FOLDER"), from_dir=False, batch_size=500, limit=-1):
+    def load_all_embeddings(self, dir=os.environ.get("EMBEDDINGS_FOLDER"), from_dir=False, batch_size=500, limit=-1, merge=True):
         """
             The entry point for loading all embeddings from Milvus
             Args:
@@ -64,24 +64,41 @@ class EmbeddingsDataset(Dataset):
                 batch_size (int): Number of embeddings to load at a time
                     only used when from_dir is False
                 limit (int): Number of embeddings to load in total. -1 to return all embeddings in Milvus             
-                    only used when from_dir is False       
+                    only used when from_dir is False    
+                merge (bool): If True, merge all the embeddings into one tensor and save it to a file   
         """
         if from_dir == False:
             self.save_embeddings_from_milvus(dir=dir, batch_size=batch_size, limit=limit)
         
-        self.embeddings, self.metadata = self.load_all_embeddings_from_folder(dir=dir)
+        self.embeddings, self.metadata = self.load_all_embeddings_from_folder(dir=dir, merge=merge)
 
         return self.embeddings, self.metadata
     
-    def load_all_embeddings_from_folder(self, dir=os.environ.get("EMBEDDINGS_FOLDER")):
+    def load_all_embeddings_from_folder(self, dir=os.environ.get("EMBEDDINGS_FOLDER"), merge=True):
         """
-            Load all embeddings from a the given directory
+            Load all embeddings from a the given directory. Expects a collection of *.pt files, in order, containing subsets of embeddings in dir,
+            as well as a metadata.csv file containing all of the metadata, in order, for the embeddings
+            If a file named "all_embeddings.pt" does not exist, it will be created by stacking all the embeddings in the directory
+            If a file named "all_embeddings.pt" does exist, it will be used in conjunction with metadata.csv instead of accessing each subset individually
             Args:
                 dir (string): Path to a folder where embeddings are stored.
+                merge (bool): If True, merge all the embeddings into one tensor and save it to a file
+                    You may want to set this to False if the file would be too big to store in memory
         """
-        #iterate over all files in this directory, and stack them into one big tensor of embeddings
+        # check if "all_embeddings.pt" exists
+        all_files = os.listdir(dir)
+        if "all_embeddings.pt" in all_files:
+            with open(os.path.join(dir, "all_embeddings.pt"), 'rb') as f:
+                embeddings = torch.load(f)
+                logger.info(f"Loaded tensor of size {embeddings.size()} from file {os.path.join(dir, 'all_embeddings.pt')}")
+            metadata = pd.read_csv(os.path.join(dir, "metadata.csv"))
+            logger.info(f"Loaded metadata from file {os.path.join(dir, 'metadata.csv')}")
+            return embeddings, metadata
+
+        # all_embeddings.pt does not exist - go through all of the subset files and build an all_embeddings.pt
+        # iterate over all files in this directory, and stack them into one big tensor of embeddings
         embeddings = None
-        for filename in os.listdir(dir):
+        for filename in all_files:
             filepath = os.path.join(dir, filename)
             with open(filepath, 'rb') as f:
                 if filename.endswith(".pt"): # build the tensor holding the embeddings
@@ -95,6 +112,12 @@ class EmbeddingsDataset(Dataset):
                 if filename.endswith(".csv"): # create the dataframe to hold the metadata!
                     metadata = pd.read_csv(f)
                     logger.info(f"Loaded metadata from file {filepath}")
+
+        # save embeddings into an all_embeddings.pt 
+        if merge:
+            with open(os.path.join(dir, "all_embeddings.pt"), 'wb') as f:
+                torch.save(embeddings, f)
+                logger.info(f"Final embeddings tensor saved to file {os.path.join(dir, 'all_embeddings.pt')}")
 
         logger.info(f"Final embeddings tensor loaded {embeddings.size()}")
         return embeddings, metadata
@@ -199,14 +222,24 @@ class EmbeddingsDataset(Dataset):
     def get_partition_stats(self, partition_names):
         return self.client.get_partition_stats(self.collection_name, partition_names)
 
-def load_test_embeddings(folder_name="test", batch_size=10, limit=50, from_dir=False):
+def load_test_embeddings(folder_name="test", batch_size=10, limit=50, from_dir=False, merge=True):
+    """
+        Load a small subset of embeddings for testing purposes
+        Args:
+            folder_name (string): Name of the folder within EMBEDDINGS_FOLDER where the embeddings will be stored
+            batch_size (int): Number of embeddings to load at a time
+            limit (int): Number of embeddings to load in total. -1 to return all embeddings in Milvus
+            from_dir (bool): If True, load embeddings from the given directory.
+                If False, load embeddings from Milvus, and save them to the given directory, and then load them
+            merge (bool): If True, merge all the embeddings into one tensor and save it to a file
+    """
     # Create a folder for embeddings if it does not exist
     path = os.path.join(os.environ.get("EMBEDDINGS_FOLDER"), folder_name)
     if not os.path.exists(path):
         os.makedirs(path)
 
     dataset = EmbeddingsDataset()
-    dataset.load_all_embeddings(dir=path, from_dir=from_dir, batch_size=batch_size, limit=limit)
+    dataset.load_all_embeddings(dir=path, from_dir=from_dir, batch_size=batch_size, limit=limit, merge=merge)
     
     # testing that everything worked
     print(dataset.metadata.head())
@@ -215,14 +248,24 @@ def load_test_embeddings(folder_name="test", batch_size=10, limit=50, from_dir=F
 
     return dataset
 
-def load_all_embeddings(folder_name="full", batch_size=500, limit=-1, from_dir=False):
+def load_all_embeddings(folder_name="full", batch_size=500, limit=-1, from_dir=False, merge=True):
+    """
+        Load all embeddings in Milvus
+        Args:
+            folder_name (string): Name of the folder within EMBEDDINGS_FOLDER where the embeddings will be stored
+            batch_size (int): Number of embeddings to load at a time
+            limit (int): Number of embeddings to load in total. -1 to return all embeddings in Milvus
+            from_dir (bool): If True, load embeddings from the given directory.
+                If False, load embeddings from Milvus, and save them to the given directory, and then load them
+            merge (bool): If True, merge all the embeddings into one tensor and save it to a file
+    """
     # Create a folder for embeddings if it does not exist
     path = os.path.join(os.environ.get("EMBEDDINGS_FOLDER"), folder_name)
     if not os.path.exists(path):
         os.makedirs(path)
 
     dataset = EmbeddingsDataset()
-    dataset.load_all_embeddings(dir=path, from_dir=from_dir, batch_size=batch_size, limit=limit)
+    dataset.load_all_embeddings(dir=path, from_dir=from_dir, batch_size=batch_size, limit=limit, merge=merge)
     
     # testing that everything worked
     print(dataset.metadata.head())
@@ -230,6 +273,8 @@ def load_all_embeddings(folder_name="full", batch_size=500, limit=-1, from_dir=F
     print(dataset.embeddings.size())
 
     return dataset
+
+
 
 if __name__ == "__main__":
     # cProfile.run('dataset = EmbeddingsDataset(save_to_file=True)', sort='cumtime')
@@ -237,10 +282,10 @@ if __name__ == "__main__":
     #from_dir=True will load embeddings from the given directory
     #from_dir=False will pull from Milvus and make new embeddings files
     
-    # dataset = load_test_embeddings(folder_name="test", from_dir=True)
+    # dataset = load_test_embeddings(folder_name="test", from_dir=True, merge=True)
 
     # before uncommenting this, make sure you are on a compute node
-    dataset = load_all_embeddings(folder_name="full", from_dir=True)
+    dataset = load_all_embeddings(folder_name="full", from_dir=True, merge=True)
 
     #testing the Dataset object functionality
     print(f"Dataset length: {len(dataset)}")
