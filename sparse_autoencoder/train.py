@@ -12,8 +12,12 @@
 
 
 import os
+import sys
 from dataclasses import dataclass
 from typing import Callable, Iterable, Iterator
+
+from sparse_autoencoder.embeddings import EmbeddingsDataset
+from torch.utils.data import DataLoader
 
 import torch
 import torch.distributed as dist
@@ -26,7 +30,9 @@ from torch.distributed import ReduceOp
 from geom_median.torch import compute_geometric_median
 from contextlib import contextmanager
 import wandb
-
+import logging
+from dotenv import load_dotenv
+import datetime
 
 RANK = int(os.environ.get("RANK", "0"))
 
@@ -292,12 +298,12 @@ class FastAutoencoder(nn.Module):
 
     def __init__(
         self,
-        n_dirs_local: int,
-        d_model: int,
-        k: int,
-        auxk: int | None,
-        dead_steps_threshold: int,
-        comms: ShardingComms | None = None,
+        n_dirs_local: int, # number of dictionary elements (sae features) per shard
+        d_model: int, # number of features in the input
+        k: int, # number of non-zero elements in the latent representation
+        auxk: int | None, # number of non-zero elements in the auxilliary representation
+        dead_steps_threshold: int, # number of steps after which a neuron is considered dead
+        comms: ShardingComms | None = None, # communication object
     ):
         super().__init__()
         self.n_dirs_local = n_dirs_local
@@ -487,7 +493,8 @@ def sharded_grad_norm(autoencoder, comms, exclude=None):
 
 
 def batch_tensors(
-    it: Iterable[torch.Tensor],
+    # in this case, the dataloader, where each element is a dictionary with keys "embeddings", "id", and "text"
+    it: Iterable[torch.Tensor], 
     batch_size: int,
     drop_last=True,
     stream=None,
@@ -502,10 +509,14 @@ def batch_tensors(
     batch_so_far = 0
 
     for t in it:
-        tensors.append(t)
-        batch_so_far += t.shape[0]
+        embedding = t['embedding'].cuda()
+        id = t['id']
+        text = t['text']
 
-        if sum(t.shape[0] for t in tensors) < batch_size:
+        tensors.append(embedding)
+        batch_so_far += embedding.shape[0]
+
+        if sum(embedding.shape[0] for embedding in tensors) < batch_size:
             continue
 
         while batch_so_far >= batch_size:
@@ -532,13 +543,12 @@ def print0(*a, **k):
         print(*a, **k)
 
 
-
-
 class Logger:
     def __init__(self, **kws):
         self.vals = {}
         self.enabled = (RANK == 0) and not kws.pop("dummy", False)
         if self.enabled:
+            print("initializing wandb...")
             wandb.init(
                 **kws
             )
@@ -555,7 +565,7 @@ class Logger:
 
 
 def training_loop_(
-    ae, train_acts_iter, loss_fn, lr, comms, eps=6.25e-10, clip_grad=None, ema_multiplier=0.999, logger=None
+    ae, train_embeddings, loss_fn, lr, comms, eps=6.25e-10, clip_grad=None, ema_multiplier=0.999, logger=None
 ):
     if logger is None:
         logger = Logger(dummy=True)
@@ -563,11 +573,11 @@ def training_loop_(
     scaler = torch.cuda.amp.GradScaler()
     autocast_ctx_manager = torch.cuda.amp.autocast()
 
-    opt = torch.optim.Adam(ae.parameters(), lr=lr, eps=eps, fused=True)
+    opt = torch.optim.Adam(ae.parameters(), lr=lr, eps=eps) #NOTE: removed fused=True
     if ema_multiplier is not None:
         ema = EmaModel(ae, ema_multiplier=ema_multiplier)
 
-    for i, flat_acts_train_batch in enumerate(train_acts_iter):
+    for i, flat_acts_train_batch in enumerate(train_embeddings):
         flat_acts_train_batch = flat_acts_train_batch.cuda()
 
         with autocast_ctx_manager:
@@ -616,7 +626,8 @@ def training_loop_(
 
 def init_from_data_(ae, stats_acts_sample, comms):
     ae.pre_bias.data = (
-        compute_geometric_median(stats_acts_sample[:32768].float().cpu()).median.cuda().float()
+        #this pre-bias term is the geometric median of a sample of the dataset
+        compute_geometric_median(stats_acts_sample.float().cpu()).median.cuda().float()
     )
     comms.all_broadcast(ae.pre_bias.data)
 
@@ -681,38 +692,75 @@ class EmaModel:
 
 @dataclass
 class Config:
-    n_op_shards: int = 1
+    n_op_shards: int = 1 # number of operation shards
     # n_replicas: int = 8
-    n_replicas: int = 1
+    n_replicas: int = 1 # number of replicas
 
-    n_dirs: int = 32768
-    bs: int = 131072
-    d_model: int = 768
-    k: int = 32
-    auxk: int = 256
+    n_dirs: int = 32768 # number of dictionary elements (sae features) per shard
+    bs: int = 4096 # batch size
+    d_model: int = 1536 # number of features in the input
+    k: int = 32768 # number of non-zero elements in the latent representation (same as n_dirs if 1 gpu?)
+    auxk: int = 512 # number of top k dead latents to calculate auxiliary loss with
 
-    lr: float = 1e-4
-    eps: float = 6.25e-10
-    clip_grad: float | None = None
-    auxk_coef: float = 1 / 32
-    dead_toks_threshold: int = 10_000_000
-    ema_multiplier: float | None = None
+    lr: float = 1e-4 # learning rate
+    eps: float = 6.25e-10 # adam epsilon
+    clip_grad: float | None = None # gradient clipping
+    auxk_coef: float = 1 / 32 # auxk coefficient
+    dead_toks_threshold: int = 10_000_000 # number of steps after which a neuron is considered dead
+    ema_multiplier: float | None = None # exponential moving average multiplier
     
-    wandb_project: str | None = None
-    wandb_name: str | None = None
-
+    wandb_project: str | None = "sparse-autoencoder"
+    wandb_name: str | None = "setup"
 
 def main():
+    # Create a folder for logs if it does not exist
+    if not os.path.exists(os.getenv("LOG_FOLDER")):
+        os.makedirs(os.getenv("LOG_FOLDER"))
+
+    #logging.stream_handler(sys.stdout)
+    #file_logger.add
+    load_dotenv()
+    
+    # mylogger=logging.getLogger('MyLogger')
+    file_logger = logging.getLogger("sae_logger")
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setLevel(logging.DEBUG)
+    formatter = logging.Formatter('%(asctime)s - %(name)s : %(message)s')
+    handler.setFormatter(formatter)
+    file_logger.addHandler(handler)
+
+    now = datetime.datetime.now().strftime("%Y-%m-%dT%H_%M_%S")
+    logging.basicConfig(
+        format='%(asctime)s %(levelname)-8s %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+        filename=os.path.join(os.getenv("LOG_FOLDER"), f"{now}.log"),
+        filemode='w')
+    
+    # print("logging.config", logging.config, flush=True)
+    os.environ["NCCL_DEBUG_FILE"] = os.path.join(os.getenv("LOG_FOLDER"), f"{now}.log")
+
+
+    file_logger.info("Starting training")
     cfg = Config()
+
+    file_logger.info(cfg)
+    file_logger.info("Creating comms...")
     comms = make_torch_comms(n_op_shards=cfg.n_op_shards, n_replicas=cfg.n_replicas)
 
-    ## dataloading is left as an exercise for the reader
-    acts_iter = ...
-    stats_acts_sample = ...
+
+    file_logger.info("Loading dataset...")
+    dataset = EmbeddingsDataset()
+    path = os.path.join(os.environ.get("EMBEDDINGS_FOLDER"), "full")
+    dataset.load_all_embeddings(dir=path, from_dir=True)
+    
+    dataloader = DataLoader(dataset, batch_size=cfg.bs, shuffle=True, num_workers=2)  # the data loader
+    stats_acts_sample = dataset.embeddings.cuda() # theoretically a sample of the dataset, but I'm just going to use all of it
 
     n_dirs_local = cfg.n_dirs // cfg.n_op_shards
     bs_local = cfg.bs // cfg.n_replicas
 
+    file_logger.info(f"n_dirs_local: {n_dirs_local}, bs_local: {bs_local}")
+    file_logger.info("Initializing the FastAutoencoder...")
     ae = FastAutoencoder(
         n_dirs_local=n_dirs_local,
         d_model=cfg.d_model,
@@ -721,9 +769,12 @@ def main():
         dead_steps_threshold=cfg.dead_toks_threshold // cfg.bs,
         comms=comms,
     )
+    file_logger.info("sending SAE to cuda...")
     ae.cuda()
+    file_logger.info("initializing from data...")
     init_from_data_(ae, stats_acts_sample, comms)
     # IMPORTANT: make sure all DP ranks have the same params
+    file_logger.info("initializing comms broadcast...")
     comms.init_broadcast_(ae)
 
     mse_scale = (
@@ -732,16 +783,17 @@ def main():
     comms.all_broadcast(mse_scale)
     mse_scale = mse_scale.item()
 
-    logger = Logger(
+    logger = Logger( # this is a custom logger
         project=cfg.wandb_project,
         name=cfg.wandb_name,
         dummy=cfg.wandb_project is None,
     )
-
+    
+    file_logger.info("starting training loop...")
     training_loop_(
         ae,
         batch_tensors(
-            acts_iter,
+            dataloader,
             bs_local,
             drop_last=True,
         ),

@@ -38,7 +38,11 @@ pip install -e .
    2. MILVUS_TOKEN=<authentication token for Milvus db>
    3. LOG_FOLDER=<filepath to folder containing log files>
    4. EMBEDDINGS_FOLDER=<filepath folder containing embeddings>
-6. Running the code: Request a compute node with a GPU. NOTE: not everyone has access to this partition
+   5. RANK=0 # the index of the GPU to use
+   6. WORLD_SIZE=1 # Number of processes participating in the job
+   7. NCCL_DEBUG=INFO
+   
+6. Testing CUDA access: Request a compute node with a GPU. NOTE: not everyone has access to this partition
 
 ```sh
 srun --time 1:00:00 --gres=gpu:1 -n 1 -N 1 --partition mit_normal_gpu --pty /bin/bash
@@ -46,6 +50,17 @@ module load miniforge
 mamba activate stacky-sae
 cd sparse_autoencoder
 python testing.py #you should see that you have access to a CUDA GPU!
+```
+
+7. Actually training the model
+```sh
+srun --time 3:00:00 --gres=gpu:1 -n 1 -N 1 --partition mit_normal_gpu --pty /bin/bash
+module load miniforge
+mamba activate stacky-sae
+cd sparse_autoencoder
+torchrun sparse_autoencoder/train.py
+
+# log in to wandb using an existing account, and use the Stacky account, whose credentials are available on the #credentials canvas on slack
 ```
 
 #### Failed attempts at environment setup:

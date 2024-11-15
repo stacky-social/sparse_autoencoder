@@ -16,7 +16,7 @@ import cProfile
 
 
 load_dotenv()
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("sae_logger")
 # Create a folder for logs if it does not exist
 if not os.path.exists(os.getenv("LOG_FOLDER")):
     os.makedirs(os.getenv("LOG_FOLDER"))
@@ -25,14 +25,13 @@ if not os.path.exists(os.getenv("LOG_FOLDER")):
 if not os.path.exists(os.getenv("EMBEDDINGS_FOLDER")):
     os.makedirs(os.getenv("EMBEDDINGS_FOLDER"))
 
-now = datetime.datetime.now().strftime("%Y-%m-%dT%H_%M_%S")
-logging.basicConfig(
-    format='%(asctime)s %(levelname)-8s %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S',
-    filename=os.path.join(os.getenv("LOG_FOLDER"), f"{now}.log"),
-    filemode='w')
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+# now = datetime.datetime.now().strftime("%Y-%m-%dT%H_%M_%S")
+# logging.basicConfig(
+#     format='%(asctime)s %(levelname)-8s %(message)s',
+#     datefmt='%Y-%m-%d %H:%M:%S',
+#     filename=os.path.join(os.getenv("LOG_FOLDER"), f"{now}.log"),
+#     filemode='w')
+# logger.setLevel(logging.DEBUG)
 
 class EmbeddingsDataset(Dataset):
 
@@ -180,7 +179,7 @@ class EmbeddingsDataset(Dataset):
             start = end+1
                     
         logger.info(f"Total number of embeddings saved: {total}")
-        dataset.release_collection()
+        self.release_collection()
     
     def __len__(self):
         return self.embeddings.size(0)
