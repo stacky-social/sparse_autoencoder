@@ -33,6 +33,7 @@ import wandb
 import logging
 from dotenv import load_dotenv
 import datetime
+import pdb
 
 RANK = int(os.environ.get("RANK", "0"))
 
@@ -593,6 +594,8 @@ def training_loop_(
             wandb.log({"train_loss": loss.item()})
 
         loss = scaler.scale(loss)
+        loss = loss.to(torch.float32) #NOTE: cast loss to prevent errors in triton
+
         loss.backward()
 
         unit_norm_decoder_(ae)
@@ -823,4 +826,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+
+    try:
+        main()
+    except Exception as e:
+        _, _, tb = sys.exc_info()
+        print("Encountered an exception! Starting debugger...")
+        pdb.post_mortem(tb)
