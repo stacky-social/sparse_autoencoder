@@ -594,7 +594,7 @@ def training_loop_(
             wandb.log({"train_loss": loss.item()})
 
         loss = scaler.scale(loss)
-        loss = loss.to(torch.float32) #NOTE: cast loss to prevent errors in triton
+        # loss = loss.to(torch.float32) #NOTE: cast loss to prevent errors in triton
 
         loss.backward()
 
@@ -699,10 +699,10 @@ class Config:
     # n_replicas: int = 8
     n_replicas: int = 1 # number of replicas
 
-    n_dirs: int = 32768 # number of dictionary elements (sae features) per shard
-    bs: int = 4096 # batch size
+    n_dirs: int = 2048 # number of dictionary elements (sae features) per shard
+    bs: int = 2048 # batch size
     d_model: int = 1536 # number of features in the input
-    k: int = 32768 # number of non-zero elements in the latent representation (same as n_dirs if 1 gpu?)
+    k: int = 2048 # number of non-zero elements in the latent representation (same as n_dirs if 1 gpu?)
     auxk: int = 512 # number of top k dead latents to calculate auxiliary loss with
 
     lr: float = 1e-4 # learning rate
@@ -755,9 +755,8 @@ def main():
     dataset = EmbeddingsDataset()
     path = os.path.join(os.environ.get("EMBEDDINGS_FOLDER"), "full")
     dataset.load_all_embeddings(dir=path, from_dir=True)
-    
     dataloader = DataLoader(dataset, batch_size=cfg.bs, shuffle=True, num_workers=2)  # the data loader
-    stats_acts_sample = dataset.embeddings.cuda() # theoretically a sample of the dataset, but I'm just going to use all of it
+    stats_acts_sample = dataset.embeddings.cuda().to(torch.float16) # theoretically a sample of the dataset, but I'm just going to use all of it
 
     n_dirs_local = cfg.n_dirs // cfg.n_op_shards
     bs_local = cfg.bs // cfg.n_replicas
