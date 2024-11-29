@@ -1,3 +1,8 @@
+"""
+SAE architecture modelled after 
+https://github.com/jsalt2024-evaluating-llms-for-astronomy/retrieval/blob/main/saerch/vanilla_sae.py
+"""
+
 import torch
 import torch.nn as nn
 import torch.optim as optim

@@ -10,7 +10,11 @@ dependencies = [
     "transformer_lens",
     "geom_median",
     "python-dotenv",
-    "pymilvus"
+    "pymilvus",
+    "ipykernel",
+    "umap-learn",
+    "matplotlib",
+    "wordcloud"
 ]
 readme = "README.md"
 
