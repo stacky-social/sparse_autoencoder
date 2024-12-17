@@ -41,8 +41,9 @@ class FastAutoencoder(nn.Module):
         latents_pre_act = self.encoder(x) + self.latent_bias # (batch_size, n_dirs)
 
         # Main top-k selection
-        topk_values, topk_indices = torch.topk(latents_pre_act, k=self.k, dim=-1)
-        topk_values = F.relu(topk_values)
+        topk_values, topk_indices = torch.topk(latents_pre_act, k=self.k, dim=-1) # each one is (batch_size, k)
+        topk_values = F.relu(topk_values) # (batch_size, k)
+
         multik_values, multik_indices = torch.topk(latents_pre_act, k=4*self.k, dim=-1)
         multik_values = F.relu(multik_values)
 
@@ -178,7 +179,7 @@ def train(ae, train_loader, optimizer, epochs, k, auxk_coef, multik_coef, clip_g
     step = 0
     num_batches = len(train_loader)
     for epoch in range(epochs):
-        ae.train()
+        ae.train() # sets the model to train mode
         total_loss = 0
         for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
             optimizer.zero_grad()
@@ -221,6 +222,43 @@ def train(ae, train_loader, optimizer, epochs, k, auxk_coef, multik_coef, clip_g
         save_path = os.path.join(save_dir, f"{model_name}_epoch_{epoch+1}.pth")
         torch.save(ae.state_dict(), save_path)
         print(f"Model saved to {save_path}")
+
+def get_topk_activations(ae, embeddings, model_name, sae_data_path):
+    """
+        Args: 
+            ae: the autoencoder model
+            embeddings: all dataset embeddings in order
+            model_name: the name of the ae as described upon initialization
+            sae_data_path: the filepath to save the topk_indices and topk_values matrices
+        Returns:
+            None, saves two numpy files named {model_name}_topk_indices.npy and {model_name}_topk_values.npy
+    """
+    topk_indices = []
+    topk_values = []
+    for embed in embeddings:
+        recons, info = ae(embed.to(device))
+        # print(type(info["topk_indices"].cpu().size))
+        topk_indices.append(info["topk_indices"].cpu())
+        topk_values.append(info["topk_values"].cpu())
+    
+    # convert the list of tensors into a tensor
+    topk_indices = torch.vstack(topk_indices)
+    topk_values = torch.vstack(topk_values)
+
+    # convert the tensor into a numpy array
+    topk_indices = topk_indices.cpu().detach().numpy()
+    topk_values = topk_values.cpu().detach().numpy()
+
+    print(topk_indices.size)
+    print(topk_values.size)
+
+    if not os.path.exists(sae_data_path):
+        os.makedirs(sae_data_path)
+
+    indices_path = os.path.join(sae_data_path, f"{model_name}_topk_indices.npy")
+    values_path = os.path.join(sae_data_path, f"{model_name}_topk_values.npy")
+    np.save(indices_path, topk_indices)
+    np.save(values_path, topk_values)
 
 def main():
     d_model = 1536
@@ -287,4 +325,30 @@ def main():
     wandb.finish()
 
 if __name__ == "__main__":
-    main()
+    # main()
+    d_model = 1536
+    n_dirs = 9216 # 1536 * 6
+    k = 64
+    auxk = k*2 #256
+    multik = 128
+    batch_size = 1024
+    lr = 1e-4
+    epochs = 50
+    auxk_coef = 1/32
+    clip_grad = 1.0
+    multik_coef = 0 # turn it off
+    data_size = "full" #full, test
+    init_type = "initsample10k" #initfull, initsample10k, initfirst10k
+
+    load_dotenv()
+
+    dataset = EmbeddingsDataset()
+    path = os.path.join(os.environ.get("EMBEDDINGS_FOLDER"), data_size)
+    dataset.load_all_embeddings(dir=path, from_dir=True)
+    embeddings = dataset.embeddings
+
+    model_name = f"k{k}_ndirs{n_dirs}_auxk{auxk}_{data_size}_{init_type}"
+    
+    ksae = FastAutoencoder(n_dirs, d_model, k, auxk, multik).to(device)
+    sae_data_path = os.path.join(os.environ.get("SAE_DATA_FOLDER"))
+    get_topk_activations(ksae, embeddings, model_name, sae_data_path)

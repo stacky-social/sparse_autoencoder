@@ -38,9 +38,10 @@ pip install -e .
    2. MILVUS_TOKEN=`<authentication token for Milvus db>`
    3. LOG_FOLDER=`<filepath to folder containing log files>`
    4. EMBEDDINGS_FOLDER=`<filepath folder containing embeddings>`
-   5. RANK=0 # the index of the GPU to use
-   6. WORLD_SIZE=1 # Number of processes participating in the job
-   7. NCCL_DEBUG=INFO
+   5. SAE_DATA_FOLDER=`<filepath folder containing topk_indices and topk_values for models>`
+   6. MODEL_CHECKPOINTS_FOLDER=`<filepath folder containing model checkpoints>`
+   7. OUTPUT_FOLDER=`<filepath folder containing outputs for the neuron_analyzer>`
+   8. OPENAI_API_KEY=`<OpenAI API key>`
 6. Testing CUDA access: Request a compute node with a GPU. NOTE: not everyone has access to this partition
 
 ```sh

@@ -14,7 +14,10 @@ dependencies = [
     "ipykernel",
     "umap-learn",
     "matplotlib",
-    "wordcloud"
+    "wordcloud",
+    "pathlib",
+    "openai",
+    "tenacity"
 ]
 readme = "README.md"
 

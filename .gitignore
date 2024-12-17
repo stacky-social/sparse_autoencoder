@@ -132,3 +132,5 @@ dmypy.json
 embeddings/*
 wandb/
 checkpoints/
+output/neuron_analyzer/*
+sae_data/*
