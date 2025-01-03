@@ -25,13 +25,13 @@ if not os.path.exists(os.getenv("LOG_FOLDER")):
 if not os.path.exists(os.getenv("EMBEDDINGS_FOLDER")):
     os.makedirs(os.getenv("EMBEDDINGS_FOLDER"))
 
-# now = datetime.datetime.now().strftime("%Y-%m-%dT%H_%M_%S")
-# logging.basicConfig(
-#     format='%(asctime)s %(levelname)-8s %(message)s',
-#     datefmt='%Y-%m-%d %H:%M:%S',
-#     filename=os.path.join(os.getenv("LOG_FOLDER"), f"{now}.log"),
-#     filemode='w')
-# logger.setLevel(logging.DEBUG)
+now = datetime.datetime.now().strftime("%Y-%m-%dT%H_%M_%S")
+logging.basicConfig(
+    format='%(asctime)s %(levelname)-8s %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    filename=os.path.join(os.getenv("LOG_FOLDER"), f"{now}.log"),
+    filemode='w')
+logger.setLevel(logging.DEBUG)
 
 class EmbeddingsDataset(Dataset):
 
@@ -174,13 +174,61 @@ class EmbeddingsDataset(Dataset):
                     for x in result:
                         if 'text' not in x:
                             continue
-                        writer.writerow([x['id'], x['text']])
+
+                        cleaned_text = x['text'].replace("\n", " ").replace("\t", " ")
+                        writer.writerow([x['id'], cleaned_text])
             
             start = end+1
                     
         logger.info(f"Total number of embeddings saved: {total}")
         self.release_collection()
     
+    def get_all_ids_in_milvus(self, batch_size=500, limit=-1):
+        """
+        Returns a list of all ids in the loaded collection and partitions.
+        """
+        ids = []
+
+        iterator = self.collection.query_iterator(
+            batch_size=batch_size,
+            limit=limit, 
+            output_fields=["id", "text_vector", "text"]
+        )
+
+        start = 0 # for file naming
+        end = 0 # for file naming
+        num_no_text = 0
+        
+        while True:
+            result = iterator.next()
+            num_returned = len(result)
+            logger.info(f"queried {num_returned} embeddings")
+            end += num_returned
+
+            if not result:
+                iterator.close()
+                break
+            else:
+                # record all the returned ids
+                logger.info("returning ids...")
+                for x in result:
+                    if 'text' not in x: num_no_text += 1
+                    ids.append(x['id'])
+            
+            start = end+1
+
+        logger.info(f"{num_no_text} vectors missing text")
+        logger.info(f"returning {len(ids)} ids")
+        return ids
+
+    def get_from_milvus(self, ids=[]):
+        res = self.client.get(
+            collection_name=self.collection_name,
+            ids=ids,
+            output_fields=["id", "text", "text_vector"]
+        )
+        return res
+
     def __len__(self):
         return self.embeddings.size(0)
 
@@ -284,7 +332,7 @@ if __name__ == "__main__":
     # dataset = load_test_embeddings(folder_name="test", from_dir=True, merge=True)
 
     # before uncommenting this, make sure you are on a compute node
-    dataset = load_all_embeddings(folder_name="full", from_dir=True, merge=True)
+    dataset = load_all_embeddings(folder_name="full_cleaned", from_dir=True, merge=True)
 
     #testing the Dataset object functionality
     print(f"Dataset length: {len(dataset)}")
