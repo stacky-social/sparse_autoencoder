@@ -1,5 +1,7 @@
 import json
 import os
+import csv
+import re
 import logging
 from pathlib import Path
 from dotenv import load_dotenv
@@ -50,6 +52,8 @@ class Feature:
     index: int
     label: str
     reasoning: str
+    top_posts: list
+    zero_posts: list
     f1: float
     pearson_correlation: float
     density: float
@@ -119,7 +123,7 @@ Work through the steps thoroughly and analytically to predict whether the neuron
         self.embeddings, self.metadata = self.load_embeddings()
 
     def load_sae_data(self, model_name) -> Tuple[np.ndarray, np.ndarray]:
-        topk_indices = np.load(SAE_DATA_DIR / f"{model_name}_topk_indices.npy")
+        topk_indices = np.load(SAE_DATA_DIR / f"{model_name}_topk_indices.npy") # (data_size, k)
         topk_values = np.load(SAE_DATA_DIR / f"{model_name}_topk_values.npy")
         logger.info(f"loaded {model_name}_topk_indices.npy and {model_name}_topk_values.npy")
         print(topk_indices.shape, topk_values.shape)
@@ -241,7 +245,12 @@ Work through the steps thoroughly and analytically to predict whether the neuron
 
     def analyze_feature(self, feature_index: int, num_samples: int) -> Feature:
         logger.info(f"analyzing feature {feature_index}")
+        
+        #return format: ((doc_id, text, activation_amount), (doc_id, text, 0))
         top_posts, zero_posts = self.get_feature_activations(feature_index, num_samples)
+        top_posts_result = [{"id": int(doc_id), "text": text, "activation": float(activation)} for doc_id, text, activation in top_posts]
+        zero_posts_result = [{"id": int(doc_id), "text": text, "activation": float(activation)} for doc_id, text, activation in zero_posts]
+        
         logger.debug(f"generating interpretation for feature {feature_index}...")
         interpretation_full = self.generate_interpretation(top_posts, zero_posts)
         logger.debug(f"generated interpretation for feature {feature_index}")
@@ -261,12 +270,14 @@ Work through the steps thoroughly and analytically to predict whether the neuron
 
         logger.debug(f"returning feature {feature_index}")
         return Feature(
-            index=feature_index,
-            label=interpretation,
-            reasoning=interpretation_full,
-            f1=f1,
-            pearson_correlation=correlation,
-            density=density
+            index=feature_index, # the index of the feature
+            label=interpretation, # the final LLM interpretation of the feature's label
+            reasoning=interpretation_full, # the full LLM reasoning
+            top_posts=top_posts_result,
+            zero_posts=zero_posts_result,
+            f1=f1, # the f1 score of predicting whether or not the given top posts will activate the neuron
+            pearson_correlation=correlation, # the pearson correlation between the actual sample post activations and the predictions
+            density=density # average number of data points which activated this feature
         )
 
 def save_results(results: List[Dict], filename: Path):
@@ -280,12 +291,106 @@ def load_results(filename: Path) -> List[Dict]:
             return json.load(f)
     return []
 
+def convert_to_csv(filename: Path) -> None:
+    """
+    THIS IS STILL BROKEN
+    """
+    results = load_results(filename)
+
+    sample = results[0]
+    num_top_posts = len(sample["top_posts"])
+    top_post_labels_interim = list(zip([f"top_post_{idx}_id" for idx in range(num_top_posts)], \
+                        [f"top_post_{idx}_text" for idx in range(num_top_posts)], \
+                        [f"top_post_{idx}_activation" for idx in range(num_top_posts)]))
+    top_post_labels = []
+    for tup in top_post_labels_interim:
+        top_post_labels.extend(list(tup))
+
+    # print(top_post_labels)
+    num_zero_posts = len(sample["zero_posts"])
+    zero_post_labels_interim = list(zip([f"zero_post_{idx}_id" for idx in range(num_zero_posts)], \
+                        [f"zero_post_{idx}_text" for idx in range(num_zero_posts)], \
+                        [f"zero_post_{idx}_activation" for idx in range(num_zero_posts)]))
+    zero_post_labels = []
+    for tup in zero_post_labels_interim:
+        zero_post_labels.extend(list(tup))
+        
+    # print(zero_post_labels)
+    header = "\t".join(["index", "label", "reasoning"] + top_post_labels + zero_post_labels + ["f1", "pearson_correlation", "density"])
+    header += "\n"
+    parent = filename.parent #prefix folders
+    stem = filename.stem  # filename without file suffix
+
+    filepath = parent / f"{stem}.tsv"
+    logger.info(f"saving to tsv file: {filepath}")
+    with open(f"{filepath}", "w") as f:
+        f.write(header)
+        for feature in results:
+            line = ""
+            line += f"{feature['index']}\t"
+            line += f"{feature['label']}\t"
+            cleaned_reasoning = feature['reasoning'].replace('\n', ' ').replace('\t', ' ')
+            line += f"{cleaned_reasoning}\t"
+
+            for idx, top_post in enumerate(feature["top_posts"]):
+                line += f"{top_post['id']}\t"
+                # text = re.sub('[\n\t]*',' ',top_post["text"]) # remove new lines and tabs from the text for display purposes
+                cleaned_text = top_post["text"].replace("\n", "").replace("\t", "")
+                # output   = re.sub(r"[\n\t\s]*", "", myString)
+                line += f"{cleaned_text}\t"
+                line += f"{top_post['activation']}\t"
+                
+            for idx, zero_post in enumerate(feature["zero_posts"]):
+                line += f"{zero_post['id']}\t"
+                # text = re.sub('[\n\t]*',' ',zero_post["text"]) # remove new lines and tabs from the text for display purposes
+                cleaned_text = zero_post["text"].replace("\n", "").replace("\t", "")
+                line += f"{cleaned_text}\t"
+                line += f"{zero_post['activation']}\t"
+
+            line += f"{feature['f1']}\t"
+            line += f"{feature['pearson_correlation']}\t"
+            line += f"{feature['density']}\t"
+            line += "\n"
+            f.write(line)
+
+def convert_to_markdown(filename: Path) -> None:
+    """
+    THIS ONE WORKS. USE THIS TO EXPORT RESULTS
+    """
+    results = load_results(filename)
+    parent = filename.parent #prefix folders
+    stem = filename.stem  # filename without file suffix
+
+    filepath = parent / f"{stem}.md"
+    logger.info(f"saving to md file: {filepath}")
+    with open(f"{filepath}", "w") as f:
+        f.write("# Results\n\n")
+        for result in results:
+            f.write(f"## Feature {result['index']}: {result['label']}\n\n")
+            f.write(f"### Stats\n\n")
+            f.write(f"F1 score: {result['f1']}\n\n")
+            f.write(f"Pearson Correlation: {result['pearson_correlation']}\n\n")
+            f.write(f"Post Density: {result['density']}\n\n")
+            f.write(f"### Top Posts\n\n")
+            for post in result['top_posts']:
+                f.write(f"#### Top Post {post['id']}: Activation {post['activation']}\n\n")
+                f.write(f"{post['text']}\n\n")
+
+            f.write(f"### Zero Posts\n\n")
+            for post in result['zero_posts']:
+                f.write(f"#### Zero Post {post['id']}: Activation {post['activation']}\n\n")
+                f.write(f"{post['text']}\n\n")
+            
+            f.write(f"### Explanation\n\n")
+            f.write(f"{result['reasoning']}\n\n")
+    
+
 def main():
     logger.info("Creating Neuron Analyzer...")
     model_name = "k64_ndirs9216_auxk128_full_initsample10k"
 
     # === WARNING: THESE NUMBERS DICTATE THE COST OF RUNNING THIS CODE === # 
-    num_features = 3 # number of SAE features to analyze
+    num_features = 10 # number of SAE features to analyze
     num_samples = 10 # number of activating examples to base analysis on
     # ==================================================================== #
 
@@ -332,5 +437,10 @@ if __name__ == "__main__":
     print(OUTPUT_DIR)
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
+    
+    print("Hello world")
 
-    main()
+    # main()
+    result_path = OUTPUT_DIR / "feature_analysis_results_2024-12-26T15_06_48.json"
+    # convert_to_csv(result_path)
+    convert_to_markdown(result_path)
